@@ -2,6 +2,10 @@
 	[Parameter(mandatory = $false)]
 	[object]$WebHookData
 )
+try {
+	function get_state {
+		return (& 'C:\Users\monakran\work\1_drive\proj\wvd_scaling_script\state.ps1')
+	}
 # If runbook was called from Webhook, WebhookData will not be null.
 if ($WebHookData) {
 
@@ -40,7 +44,7 @@ $AutomationAccountName = $Input.AutomationAccountName
 $ConnectionAssetName = $Input.ConnectionAssetName
 
 Set-ExecutionPolicy -ExecutionPolicy Undefined -Scope Process -Force -Confirm:$false
-Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope LocalMachine -Force -Confirm:$false
+# Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope LocalMachine -Force -Confirm:$false
 # Setting ErrorActionPreference to stop script execution when error occurs
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -105,6 +109,7 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsPrimaryKey)
 		}
 	}
 
+	<#
 	# Collect the credentials from Azure Automation Account Assets
 	$Connection = Get-AutomationConnection -Name $ConnectionAssetName
 
@@ -148,6 +153,7 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsPrimaryKey)
 	Write-Output "Authenticating as service principal for WVD. Result: `n$WVDObj"
 	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Authenticating as service principal for WVD. Result: `n$WVDObj" }
 	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+	#>
 
 	<#
 	.Description
@@ -845,6 +851,7 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsPrimaryKey)
 # Without Workspace
 else {
 
+	<#
 	#Collect the credentials from Azure Automation Account Assets
 	$Connection = Get-AutomationConnection -Name $ConnectionAssetName
 
@@ -878,6 +885,7 @@ else {
 	}
 	$WVDObj = $WVDAuthentication | Out-String
 	Write-Output "Authenticating as service principal for WVD. Result: `n$WVDObj"
+	#>
 
 	<#
 	.Description
@@ -1033,7 +1041,8 @@ else {
 		$SkipSessionhosts = 0
 		$SkipSessionhosts = @()
 
-		$HostPoolUserSessions = Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName
+		# $HostPoolUserSessions = Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName
+		$HostPoolUserSessions = (get_state).user_sessions
 
 		foreach ($SessionHost in $ListOfSessionHosts) {
 
@@ -1041,7 +1050,7 @@ else {
 			$VMName = $SessionHostName.Split(".")[0]
 			# Check if VM is in maintenance
 			$RoleInstance = Get-AzVM -Status | Where-Object { $_.Name.Contains($VMName) }
-			if ($RoleInstance.Tags.Keys -contains $MaintenanceTagName) {
+			if (!$RoleInstance -or $RoleInstance.Tags.Keys -contains $MaintenanceTagName) {
 				Write-Output "Session host is in maintenance: $VMName, so script will skip this VM"
 				$SkipSessionhosts += $SessionHost
 				continue
@@ -1225,7 +1234,7 @@ else {
 			$VMName = $SessionHostName.Split(".")[0]
 			$RoleInstance = Get-AzVM -Status | Where-Object { $_.Name.Contains($VMName) }
 			# Check the session host is in maintenance
-			if ($RoleInstance.Tags.Keys -contains $MaintenanceTagName) {
+			if (!$RoleInstance -or $RoleInstance.Tags.Keys -contains $MaintenanceTagName) {
 				Write-Output "Session host is in maintenance: $VMName, so script will skip this VM"
 				$SkipSessionhosts += $SessionHost
 				continue
@@ -1264,6 +1273,7 @@ else {
 					if ($NumberOfRunningHost -gt $MinimumNumberOfRDSH) {
 						$SessionHostName = $SessionHost.SessionHostName
 						$VMName = $SessionHostName.Split(".")[0]
+						# if ((get_state).session_hosts[$SessionHost.SessionHostName].Sessions -eq 0) {
 						if ($SessionHost.Sessions -eq 0) {
 							# Shutdown the Azure VM, which session host have 0 sessions
 							Write-Output "Stopping Azure VM: $VMName and waiting for it to complete ..."
@@ -1382,7 +1392,8 @@ else {
 			}
 		}
 		$HostpoolMaxSessionLimit = $HostpoolInfo.MaxSessionLimit
-		$HostpoolSessionCount = (Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName).Count
+		# $HostpoolSessionCount = (Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName).Count
+		$HostpoolSessionCount = (get_state).user_sessions.Count
 		if ($HostpoolSessionCount -ne 0)
 		{
 			# Calculate the how many sessions will allow in minimum number of RDSH VMs in off peak hours and calculate TotalAllowSessions Scale Factor
@@ -1447,4 +1458,24 @@ else {
 	}
 	Write-Output "HostpoolName: $HostpoolName, TotalRunningCores: $TotalRunningCores NumberOfRunningHosts: $NumberOfRunningHost"
 	Write-Output "End WVD tenant scale optimization."
+}
+}
+catch {
+    $ErrMsg = ''
+    $innerExAsStr = ""
+    $numInnerExceptions = 0
+    if ($PSItem.Exception -is [System.AggregateException] -and $PSItem.Exception.InnerExceptions) {
+        $numInnerExceptions = $PSItem.Exception.InnerExceptions.Count
+        $innerExAsStr = $PSItem.Exception.InnerExceptions -join "`n"
+    }
+    
+    $ErrMsg = "$ErrMsg`nError Details:`n$($PSItem | Out-String)"
+    if ($innerExAsStr.Length -gt 0) {
+        $ErrMsg = "$ErrMsg`nInner Errors (there are $numInnerExceptions):`n$($innerExAsStr | Out-String)"
+    } 
+    
+    $ErrMsg = "$($MyInvocation.MyCommand.Source):$($MyInvocation.ScriptLineNumber) $ErrMsg"
+    Write-Error $ErrMsg
+
+    # throw [System.Exception]::new($ErrMsg, $PSItem.Exception)
 }
