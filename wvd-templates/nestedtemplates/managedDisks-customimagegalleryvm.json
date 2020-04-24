@@ -127,7 +127,7 @@
         }
     },
     "variables": {
-        "imageResourceId": "[concat('/subscriptions/', subscription().id, '/resourceGroups/', parameters('rdshImageGalleryResourceGroup') , '/providers/Microsoft.Compute/galleries/', parameters('rdshImageGalleryName'), '/images/', parameters('rdshImageDefinition'), '/versions/', parameters('rdshImageVersion'))]",
+        "imageResourceId": "[resourceId (parameters('rdshImageGalleryResourceGroup') ,'Microsoft.Compute/galleries/images/versions', parameters('rdshImageGalleryName'), parameters('rdshImageDefinition'), parameters('rdshImageVersion'))]",
         "storageAccountType": "[parameters('rdshVMDiskType')]",
         "availabilitySetId": {
             "id": "[if(parameters('createAvailabilitySet'), resourceId('Microsoft.Compute/availabilitySets/', concat(parameters('rdshPrefix'), 'availabilitySet')), json('null'))]"
